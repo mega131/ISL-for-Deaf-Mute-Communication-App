@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ISL Bidirectional Real-Time Chat</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='chat.css') }}">
+</head>
+<body>
+
+    <!-- Role Selection Modal -->
+    <div id="role-modal" class="modal-overlay">
+        <div class="modal-box glass-panel">
+            <h2><i class="fa-solid fa-comments"></i> ISL Chat Assistant</h2>
+            <p>Welcome! Setup your profile to join the real-time chat room.</p>
+            
+            <div class="input-field">
+                <label for="username-input">Your Name</label>
+                <input type="text" id="username-input" placeholder="e.g. Rahul, Priya..." required>
+            </div>
+            
+            <div class="role-selector">
+                <label>Select Your Mode</label>
+                <div class="role-options">
+                    <button type="button" class="role-btn active" data-role="deaf_mute">
+                        <i class="fa-solid fa-hands-asl-interpreting"></i>
+                        <span>Deaf / Mute</span>
+                        <small>Use webcam sign detection</small>
+                    </button>
+                    <button type="button" class="role-btn" data-role="hearing">
+                        <i class="fa-solid fa-ear-listen"></i>
+                        <span>Hearing Person</span>
+                        <small>Use keyboard / mic</small>
+                    </button>
+                </div>
+            </div>
+            
+            <button id="btn-join-chat" class="btn btn-primary btn-block">Join Chat Room</button>
+        </div>
+    </div>
+
+    <!-- Main Chat Application Container -->
+    <div class="app-layout" style="display: none;">
+        
+        <!-- Sidebar -->
+        <aside class="chat-sidebar">
+            <div class="sidebar-header">
+                <div class="user-profile">
+                    <div class="avatar"><i class="fa-solid fa-user"></i></div>
+                    <div class="user-info">
+                        <h4 id="user-display-name">Loading...</h4>
+                        <span id="user-display-role" class="badge">Deaf / Mute</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="chat-list">
+                <div class="chat-item active">
+                    <div class="chat-avatar"><i class="fa-solid fa-users"></i></div>
+                    <div class="chat-details">
+                        <div class="chat-title">
+                            <h4>Public Room 1</h4>
+                            <span class="time">Active</span>
+                        </div>
+                        <p class="last-msg">Real-time sign language channel</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="sidebar-footer">
+                <button id="btn-clear-chat" class="btn btn-secondary w-100"><i class="fa-solid fa-trash-can"></i> Clear Chat Room</button>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="chat-area">
+            
+            <!-- Chat Header -->
+            <header class="chat-header">
+                <div class="header-info">
+                    <h3><i class="fa-solid fa-circle" class="online-indicator"></i> Real-time Bidirectional Channel</h3>
+                    <p id="room-status">Waiting for others to join...</p>
+                </div>
+                <div class="header-actions">
+                    <button id="toggle-camera-btn" class="btn btn-outline" style="display: none;">
+                        <i class="fa-solid fa-video"></i> Toggle Camera
+                    </button>
+                </div>
+            </header>
+
+            <!-- Chat Message History -->
+            <div class="message-history" id="message-container">
+                <!-- Messages will be populated dynamically -->
+            </div>
+
+            <!-- Message Input Area -->
+            <footer class="message-composer">
+                <div class="composer-controls">
+                    <!-- Typing / Hands-free preview bubble -->
+                    <div class="composer-preview" id="composer-preview" style="display: none;">
+                        <span class="preview-label">Webcam Draft:</span>
+                        <span class="preview-text" id="draft-text"></span>
+                    </div>
+                    
+                    <div class="input-row">
+                        <button id="btn-mic-composer" class="btn btn-icon" title="Speech Recognition"><i class="fa-solid fa-microphone"></i></button>
+                        <input type="text" id="composer-input" placeholder="Type a message...">
+                        <button id="btn-send-message" class="btn btn-icon btn-primary-color" title="Send message"><i class="fa-solid fa-paper-plane"></i></button>
+                    </div>
+                    
+                    <div class="composer-options">
+                        <label class="toggle-option">
+                            <input type="checkbox" id="chk-speak-send">
+                            <span><i class="fa-solid fa-microphone-lines"></i> Speak & Send (Auto-send voice)</span>
+                        </label>
+                    </div>
+                </div>
+            </footer>
+        </main>
+
+        <!-- Right Visualizer Drawer (Webcam & Sign Visuals) -->
+        <section class="visualizer-drawer" id="visualizer-drawer">
+            
+            <!-- Webcam Stream Box (Only visible for Deaf/Mute users) -->
+            <div class="visual-panel webcam-panel" id="webcam-drawer-box" style="display: none;">
+                <div class="panel-header">
+                    <h4><i class="fa-solid fa-camera"></i> Sign Detection Preview</h4>
+                </div>
+                <div class="webcam-wrapper">
+                    <img id="webcam-stream" src="" alt="Camera feed connecting...">
+                    <div class="webcam-overlay">
+                        <div class="predict-pill">
+                            Sign: <strong id="pred-char">?</strong> <span id="pred-conf-score">(0%)</span>
+                        </div>
+                        <div class="autofill-indicator" id="autofill-indicator">
+                            <div class="autofill-bar" id="autofill-bar"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="draft-actions">
+                    <button id="btn-draft-send" class="btn btn-primary"><i class="fa-solid fa-paper-plane"></i> Send Message</button>
+                    <button id="btn-draft-add" class="btn btn-secondary btn-sm"><i class="fa-solid fa-plus"></i> Add Word</button>
+                    <button id="btn-draft-back" class="btn btn-warning btn-sm"><i class="fa-solid fa-delete-left"></i> Backspace</button>
+                    <button id="btn-draft-clear" class="btn btn-danger btn-sm"><i class="fa-solid fa-trash"></i> Clear</button>
+                </div>
+
+                <!-- Quick Phrases for Illiterate/Hands-free Users -->
+                <div class="quick-phrases-panel" id="quick-phrases-box" style="display: none;">
+                    <div class="panel-header">
+                        <h4><i class="fa-solid fa-comments"></i> Quick Phrases</h4>
+                    </div>
+                    <div class="phrase-buttons">
+                        <button type="button" class="btn-phrase" data-phrase="HELLO"><i class="fa-solid fa-hand"></i> Hello</button>
+                        <button type="button" class="btn-phrase" data-phrase="THANK YOU"><i class="fa-solid fa-hands-praying"></i> Thank You</button>
+                        <button type="button" class="btn-phrase" data-phrase="HELP"><i class="fa-solid fa-circle-info"></i> Help</button>
+                        <button type="button" class="btn-phrase" data-phrase="YES"><i class="fa-solid fa-thumbs-up"></i> Yes</button>
+                        <button type="button" class="btn-phrase" data-phrase="NO"><i class="fa-solid fa-thumbs-down"></i> No</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hearing User's Webcam (Visible to Deaf/Mute user) -->
+            <div class="visual-panel webcam-panel" id="hearing-webcam-box" style="display: none;">
+                <div class="panel-header">
+                    <h4><i class="fa-solid fa-user"></i> Hearing User Face</h4>
+                </div>
+                <div class="webcam-wrapper">
+                    <img id="hearing-webcam-stream" src="" alt="Waiting for Hearing User camera...">
+                </div>
+            </div>
+
+        </section>
+
+        <!-- Sign Slideshow visualizer (For translating received messages) -->
+        <div class="visual-panel sign-translator-panel" id="sign-visualizer-box" style="display: none;">
+            <div class="panel-header">
+                <h4><i class="fa-solid fa-hands-asl-interpreting"></i> ISL Translation</h4>
+                <span id="close-translator-btn" class="close-btn">&times;</span>
+            </div>
+            
+            <div class="translator-body">
+                <div class="sign-image-frame">
+                    <img id="visualizer-img" src="" alt="ISL Sign" style="display: none;">
+                    <video id="visualizer-video" src="" style="display: none;" autoplay muted playsinline></video>
+                    <div class="sign-placeholder" id="visualizer-placeholder">
+                        <span id="placeholder-char">?</span>
+                    </div>
+                </div>
+                
+                <div class="visualizer-progress">
+                    <div class="progress-bar-fill" id="visualizer-progress-bar"></div>
+                </div>
+
+                <div class="translator-controls">
+                    <div class="playback-title">
+                        Translating: <strong id="playback-text">-</strong>
+                    </div>
+                    <div class="playback-char-index">
+                        Character: <strong id="playback-char">-</strong> (<span id="playback-index">0 / 0</span>)
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Include Socket.IO client library -->
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='chat.js') }}"></script>
+</body>
+</html>

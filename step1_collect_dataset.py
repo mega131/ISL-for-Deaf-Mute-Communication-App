@@ -21,16 +21,30 @@ def main():
     if not os.path.exists(DATASET_DIR):
         os.makedirs(DATASET_DIR)
 
+    print("=" * 50)
+    print("  ISL Dataset Collection Tool")
+    print("=" * 50)
+    print("Choose collection mode:")
+    print("  1 - Standard Alphabet & Digits (A-Z, 1-9)")
+    print("  2 - Custom Word / Gesture (e.g., THANK_YOU, HELLO)")
+    
+    choice = input("Enter choice (1/2): ").strip()
+    
+    if choice == "2":
+        custom_word = input("Enter the custom word/gesture name (use uppercase and underscores, e.g., THANK_YOU): ").strip().upper()
+        if not custom_word:
+            print("[ERROR] Custom word name cannot be empty.")
+            return
+        classes_to_collect = [custom_word]
+    else:
+        classes_to_collect = CLASSES
+
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("[ERROR] Could not open webcam.")
         return
 
-    print("=" * 50)
-    print("  ISL Dataset Collection")
-    print("=" * 50)
-
-    for class_name in CLASSES:
+    for class_name in classes_to_collect:
         class_dir = os.path.join(DATASET_DIR, class_name)
         if not os.path.exists(class_dir):
             os.makedirs(class_dir)

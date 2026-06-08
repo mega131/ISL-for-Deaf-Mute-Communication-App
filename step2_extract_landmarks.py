@@ -17,25 +17,40 @@ OUTPUT_CSV = "landmarks.csv"
 
 # Initialize MediaPipe Hands
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(static_image_mode=True, max_num_hands=1, min_detection_confidence=0.5)
+hands = mp_hands.Hands(static_image_mode=True, max_num_hands=2, min_detection_confidence=0.5)
 
-def normalize_landmarks(hand_landmarks):
-    # Extract relative coordinates relative to wrist (landmark 0)
-    base_x, base_y = hand_landmarks.landmark[0].x, hand_landmarks.landmark[0].y
-    rel_coords = []
+def extract_hand_features(results):
+    # Initialize 84 coordinates (42 for Left hand, 42 for Right hand)
+    coords = [0.0] * 84
     
-    for landmark in hand_landmarks.landmark:
-        rel_coords.append([landmark.x - base_x, landmark.y - base_y])
-    
-    # Normalize by max distance to make scale invariant
-    flat_coords = [abs(val) for pair in rel_coords for val in pair]
-    max_val = max(flat_coords) if max(flat_coords) > 0 else 1.0
-    
-    normalized = []
-    for pair in rel_coords:
-        normalized.extend([pair[0] / max_val, pair[1] / max_val])
+    if not results.multi_hand_landmarks:
+        return coords
+
+    for i, hand_landmarks in enumerate(results.multi_hand_landmarks):
+        # MediaPipe classification labels: 'Left' or 'Right'
+        hand_label = results.multi_handedness[i].classification[0].label
         
-    return normalized
+        # Extract relative coordinates relative to wrist (landmark 0)
+        base_x, base_y = hand_landmarks.landmark[0].x, hand_landmarks.landmark[0].y
+        rel_coords = []
+        for landmark in hand_landmarks.landmark:
+            rel_coords.append([landmark.x - base_x, landmark.y - base_y])
+        
+        # Normalize by max distance to make scale invariant
+        flat_coords = [abs(val) for pair in rel_coords for val in pair]
+        max_val = max(flat_coords) if max(flat_coords) > 0 else 1.0
+        
+        normalized = []
+        for pair in rel_coords:
+            normalized.extend([pair[0] / max_val, pair[1] / max_val])
+            
+        # Put into correct slot
+        if hand_label == 'Left':
+            coords[0:42] = normalized
+        else:
+            coords[42:84] = normalized
+            
+    return coords
 
 def main():
     if not os.path.exists(DATASET_DIR):
@@ -43,7 +58,7 @@ def main():
         return
 
     print("=" * 50)
-    print("  Extracting Hand Landmarks")
+    print("  Extracting Hand Landmarks (Two Hands Supported)")
     print("=" * 50)
 
     data = []
@@ -67,22 +82,23 @@ def main():
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             results = hands.process(img_rgb)
 
+            # We want to extract landmarks if any hand is detected
             if results.multi_hand_landmarks:
-                for hand_landmarks in results.multi_hand_landmarks:
-                    row = [class_name]
-                    row.extend(normalize_landmarks(hand_landmarks))
-                    data.append(row)
-                    break # Only process one hand per image if multiple are found
+                features = extract_hand_features(results)
+                row = [class_name]
+                row.extend(features)
+                data.append(row)
 
     # Create DataFrame and save
     if not data:
         print("[WARNING] No hands detected in any images!")
         return
 
-    # Column names: label, x1, y1, x2, y2 ... x21, y21
+    # Column names: label, left_x0, left_y0 ... left_y20, right_x0, right_y0 ... right_y20
     columns = ['label']
-    for i in range(21):
-        columns.extend([f'x{i}', f'y{i}'])
+    for prefix in ['left', 'right']:
+        for i in range(21):
+            columns.extend([f'{prefix}_x{i}', f'{prefix}_y{i}'])
 
     df = pd.DataFrame(data, columns=columns)
     df.to_csv(OUTPUT_CSV, index=False)

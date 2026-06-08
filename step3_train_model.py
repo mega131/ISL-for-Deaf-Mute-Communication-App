@@ -55,7 +55,7 @@ def main():
 
     # 4. Build Model
     model = tf.keras.models.Sequential([
-        tf.keras.layers.Input(shape=(42,)),
+        tf.keras.layers.Input(shape=(84,)),
         tf.keras.layers.Dense(128, activation='relu'),
         tf.keras.layers.Dropout(0.2),
         tf.keras.layers.Dense(64, activation='relu'),

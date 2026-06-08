@@ -22,8 +22,8 @@ BANNER = """
 """
 
 def check_model():
-    if not os.path.exists("model/isl_model.h5"):
-        print("[WARNING] Trained model not found!")
+    if not os.path.exists("model/isl_model.tflite"):
+        print("[WARNING] Trained TFLite model not found!")
         print("  Please run the steps in order:")
         print("    python step1_collect_dataset.py   (or use Kaggle dataset)")
         print("    python step2_extract_landmarks.py")
