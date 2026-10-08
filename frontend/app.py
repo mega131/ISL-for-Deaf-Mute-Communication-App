@@ -40,6 +40,54 @@ STABILITY_THRESHOLD = 1.5  # seconds
 # Chat history storage
 chat_history = []
 
+# Multilingual Translation Engine & Pre-cached Regional Dictionary
+OFFLINE_TRANSLATIONS = {
+    'HELLO': {'hi': 'नमस्ते', 'ta': 'வணக்கம்', 'te': 'నమస్కారం', 'mr': 'नमस्कार', 'bn': 'নমস্কার', 'gu': 'નમસ્તે', 'kn': 'ನಮಸ್ಕಾರ', 'ml': 'നമസ്കാരം', 'pa': 'ਸਤ ਸ੍ਰੀ ਅਕਾਲ', 'es': 'Hola', 'fr': 'Bonjour', 'de': 'Hallo', 'ar': 'مرحبا'},
+    'THANK YOU': {'hi': 'धन्यवाद', 'ta': 'நன்றி', 'te': 'ధన్యవాదాలు', 'mr': 'धन्यवाद', 'bn': 'ধন্যবাদ', 'gu': 'આભાર', 'kn': 'ಧನ್ಯವಾದಗಳು', 'ml': 'നന്ദി', 'pa': 'ਧੰਨਵਾਦ', 'es': 'Gracias', 'fr': 'Merci', 'de': 'Danke', 'ar': 'شكرا'},
+    'HELP': {'hi': 'मदद', 'ta': 'உதவி', 'te': 'సహాయం', 'mr': 'मदत', 'bn': 'সাহায্য', 'gu': 'મદદ', 'kn': 'ಸಹಾಯ', 'ml': 'സಹాయം', 'pa': 'ਮਦਦ', 'es': 'Ayuda', 'fr': 'Aide', 'de': 'Hilfe', 'ar': 'مساعدة'},
+    'YES': {'hi': 'हाँ', 'ta': 'ஆம்', 'te': 'అవును', 'mr': 'होय', 'bn': 'হ্যাঁ', 'gu': 'હા', 'kn': 'ಹೌದು', 'ml': 'അതെ', 'pa': 'ਹਾਂ', 'es': 'Sí', 'fr': 'Oui', 'de': 'Ja', 'ar': 'نعم'},
+    'NO': {'hi': 'नहीं', 'ta': 'இல்லை', 'te': 'కాదు', 'mr': 'नाही', 'bn': 'না', 'gu': 'ના', 'kn': 'ಇಲ್ಲ', 'ml': 'ഇല്ല', 'pa': 'ਨਹੀਂ', 'es': 'No', 'fr': 'Non', 'de': 'Nein', 'ar': 'لا'},
+    'GOODBYE': {'hi': 'अलविदा', 'ta': 'பிரியாவிடை', 'te': 'వీడ్కోలు', 'mr': 'निरोप', 'bn': 'বিদায়', 'gu': 'આવજો', 'kn': 'ವಿದಾಯ', 'ml': 'വിട', 'pa': 'ਅਲਵਿਦਾ', 'es': 'Adiós', 'fr': 'Au revoir', 'de': 'Auf Wiedersehen', 'ar': 'وداعا'},
+    'PLEASE': {'hi': 'कृपया', 'ta': 'தயவுசெய்து', 'te': 'దయచేసి', 'mr': 'कृपया', 'bn': 'দয়া করে', 'gu': 'કૃપા કરીને', 'kn': 'ದಯವಿಟ್ಟು', 'ml': 'ദയവായി', 'pa': 'ਕਿਰਪਾ ਕਰਕੇ', 'es': 'Por favor', 'fr': 'S\'il vous plaît', 'de': 'Bitte', 'ar': 'من فضلك'},
+}
+
+def translate_text(text, target_lang='en', source_lang='auto'):
+    """Translates text seamlessly between English and Indian/Global languages."""
+    if not text or not str(text).strip():
+        return text
+    
+    text = str(text).strip()
+    if target_lang == source_lang:
+        return text
+    if target_lang == 'en' and all(ord(c) < 128 for c in text):
+        return text
+
+    upper_key = text.upper()
+    if upper_key in OFFLINE_TRANSLATIONS and target_lang in OFFLINE_TRANSLATIONS[upper_key]:
+        return OFFLINE_TRANSLATIONS[upper_key][target_lang]
+
+    if target_lang == 'en':
+        for en_word, lang_dict in OFFLINE_TRANSLATIONS.items():
+            if any(text == trans or text.lower() == trans.lower() for trans in lang_dict.values()):
+                return en_word
+
+    try:
+        import urllib.request
+        import urllib.parse
+        encoded_q = urllib.parse.quote(text)
+        url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl={source_lang}&tl={target_lang}&dt=t&q={encoded_q}"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+        with urllib.request.urlopen(req, timeout=3.5) as response:
+            res_data = json.loads(response.read().decode('utf-8'))
+            if res_data and isinstance(res_data, list) and len(res_data) > 0 and isinstance(res_data[0], list):
+                translated = "".join([segment[0] for segment in res_data[0] if segment and segment[0]])
+                if translated:
+                    return translated
+    except Exception as e:
+        print(f"[INFO] Translate fallback for '{text}': {e}")
+
+    return text
+
 # Load TFLite Model
 print("[INFO] Loading TFLite Model for Chat Server...")
 try:
@@ -162,10 +210,19 @@ def webcam_capture_loop():
             last_appended_prediction = ""
 
         # Encode frame to JPEG
-        ret, buffer = cv2.imencode('.jpg', frame)
+        ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 65])
         if ret:
+            frame_bytes = buffer.tobytes()
             with frame_lock:
-                latest_frame_bytes = buffer.tobytes()
+                latest_frame_bytes = frame_bytes
+                
+            # Broadcast live sign camera frames directly via WebSocket to both Laptop & Mobile in real-time
+            try:
+                import base64
+                b64_frame = "data:image/jpeg;base64," + base64.b64encode(frame_bytes).decode('utf-8')
+                socketio.emit('receive_deaf_frame', {'frame': b64_frame})
+            except Exception:
+                pass
         
         time.sleep(0.03)  # Yield CPU thread, control framerate
 
@@ -236,10 +293,36 @@ def handle_action():
         
     return jsonify({"status": "success", "current_word": current_word})
 
+@app.route('/translate', methods=['POST'])
+def handle_translate():
+    data = request.json or {}
+    text = data.get('text', '')
+    target_lang = data.get('target_lang', 'en')
+    source_lang = data.get('source_lang', 'auto')
+    
+    if not text:
+        return jsonify({"original": "", "translated": "", "target_lang": target_lang})
+        
+    translated = translate_text(text, target_lang=target_lang, source_lang=source_lang)
+    return jsonify({
+        "original": text,
+        "translated": translated,
+        "source_lang": source_lang,
+        "target_lang": target_lang
+    })
+
 @app.route('/text_to_sign', methods=['POST'])
 def text_to_sign():
-    data = request.json
-    text = data.get('text', '').upper().strip()
+    data = request.json or {}
+    raw_text = data.get('text', '').strip()
+    
+    # Multilingual: Translate regional language text to English for ISL signs
+    has_non_ascii = any(ord(c) > 127 for c in raw_text)
+    if has_non_ascii:
+        translated_en = translate_text(raw_text, target_lang='en', source_lang='auto')
+        text = translated_en.upper().strip()
+    else:
+        text = raw_text.upper().strip()
     
     signs_dir = os.path.join(PROJECT_ROOT, 'isl_signs')
     allowed_extensions = ['.mp4', '.gif', '.jpg', '.jpeg', '.png']
@@ -300,10 +383,17 @@ def handle_message(data):
     text = data.get('text', '').strip()
     sender = data.get('sender', 'Anonymous')
     role = data.get('role', 'hearing')
+    target_lang = data.get('target_lang', 'en')
     
     if text:
+        translated_text = ""
+        if target_lang and target_lang != 'en':
+            translated_text = translate_text(text, target_lang=target_lang)
+            
         msg = {
             'text': text,
+            'translated_text': translated_text,
+            'target_lang': target_lang,
             'sender': sender,
             'role': role,
             'time': time.strftime("%H:%M")

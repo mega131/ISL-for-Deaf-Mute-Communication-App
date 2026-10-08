@@ -19,7 +19,8 @@ def install_requirements():
         'matplotlib': 'matplotlib==3.7.2',
         'speech_recognition': 'SpeechRecognition==3.10.0',
         'PIL': 'Pillow==10.0.0',
-        'tqdm': 'tqdm==4.66.1'
+        'tqdm': 'tqdm==4.66.1',
+        'OpenSSL': 'pyopenssl'
     }
     
     missing_libs = []
@@ -56,12 +57,6 @@ app = Flask(__name__, template_folder='frontend/templates', static_folder='front
 app.config['SECRET_KEY'] = 'isl_secret_key_123'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# Global variables for background webcam thread
-webcam_thread = None
-webcam_running = False
-latest_frame_bytes = None
-frame_lock = threading.Lock()
-
 # Constants and Global State (relies on root directory structure)
 MODEL_DIR = "model"
 MODEL_TFLITE = os.path.join(MODEL_DIR, "isl_model.tflite")
@@ -79,6 +74,58 @@ STABILITY_THRESHOLD = 1.5  # seconds
 
 # Chat history storage
 chat_history = []
+
+# Multilingual Translation Engine & Pre-cached Regional Dictionary
+OFFLINE_TRANSLATIONS = {
+    'HELLO': {'hi': 'नमस्ते', 'ta': 'வணக்கம்', 'te': 'నమస్కారం', 'mr': 'नमस्कार', 'bn': 'নমস্কার', 'gu': 'નમસ્તે', 'kn': 'ನಮಸ್ಕಾರ', 'ml': 'നമസ്കാരം', 'pa': 'ਸਤ ਸ੍ਰੀ ਅਕਾਲ', 'es': 'Hola', 'fr': 'Bonjour', 'de': 'Hallo', 'ar': 'مرحبا'},
+    'THANK YOU': {'hi': 'धन्यवाद', 'ta': 'நன்றி', 'te': 'ధన్యవాదాలు', 'mr': 'धन्यवाद', 'bn': 'ধন্যবাদ', 'gu': 'આભાર', 'kn': 'ಧನ್ಯವಾದಗಳು', 'ml': 'നന്ദി', 'pa': 'ਧੰਨਵਾਦ', 'es': 'Gracias', 'fr': 'Merci', 'de': 'Danke', 'ar': 'شكرا'},
+    'HELP': {'hi': 'मदद', 'ta': 'உதவி', 'te': 'సహాయం', 'mr': 'मदत', 'bn': 'সাহায্য', 'gu': 'મદદ', 'kn': 'ಸಹಾಯ', 'ml': 'സഹായം', 'pa': 'ਮਦਦ', 'es': 'Ayuda', 'fr': 'Aide', 'de': 'Hilfe', 'ar': 'مساعدة'},
+    'YES': {'hi': 'हाँ', 'ta': 'ஆம்', 'te': 'అవును', 'mr': 'होय', 'bn': 'হ্যাঁ', 'gu': 'હા', 'kn': 'ಹೌದು', 'ml': 'അതെ', 'pa': 'ਹਾਂ', 'es': 'Sí', 'fr': 'Oui', 'de': 'Ja', 'ar': 'نعم'},
+    'NO': {'hi': 'नहीं', 'ta': 'இல்லை', 'te': 'కాదు', 'mr': 'नाही', 'bn': 'না', 'gu': 'ના', 'kn': 'ಇಲ್ಲ', 'ml': 'ഇല്ല', 'pa': 'ਨਹੀਂ', 'es': 'No', 'fr': 'Non', 'de': 'Nein', 'ar': 'لا'},
+    'GOODBYE': {'hi': 'अलविदा', 'ta': 'பிரியாவிடை', 'te': 'వీడ్కోలు', 'mr': 'निरोप', 'bn': 'বিদায়', 'gu': 'આવજો', 'kn': 'ವಿದಾಯ', 'ml': 'വിട', 'pa': 'ਅਲਵਿਦਾ', 'es': 'Adiós', 'fr': 'Au revoir', 'de': 'Auf Wiedersehen', 'ar': 'وداعا'},
+    'PLEASE': {'hi': 'कृपया', 'ta': 'தயவுசெய்து', 'te': 'దయచేసి', 'mr': 'कृपया', 'bn': 'দয়া করে', 'gu': 'કૃપા કરીને', 'kn': 'ದಯವಿಟ್ಟು', 'ml': 'ദയവായി', 'pa': 'ਕਿਰਪਾ ਕਰਕੇ', 'es': 'Por favor', 'fr': 'S\'il vous plaît', 'de': 'Bitte', 'ar': 'من فضلك'},
+}
+
+def translate_text(text, target_lang='en', source_lang='auto'):
+    """Translates text seamlessly between English and Indian/Global languages."""
+    if not text or not str(text).strip():
+        return text
+    
+    text = str(text).strip()
+    if target_lang == source_lang:
+        return text
+    if target_lang == 'en' and all(ord(c) < 128 for c in text):
+        return text
+
+    # 1. Quick check against local dictionary for zero-latency offline performance
+    upper_key = text.upper()
+    if upper_key in OFFLINE_TRANSLATIONS and target_lang in OFFLINE_TRANSLATIONS[upper_key]:
+        return OFFLINE_TRANSLATIONS[upper_key][target_lang]
+
+    # 2. Reverse lookup (e.g. Hindi 'नमस्ते' -> English 'HELLO' for ISL signs)
+    if target_lang == 'en':
+        for en_word, lang_dict in OFFLINE_TRANSLATIONS.items():
+            if any(text == trans or text.lower() == trans.lower() for trans in lang_dict.values()):
+                return en_word
+
+    # 3. Dynamic online translation with automatic timeout and fallback
+    try:
+        import urllib.request
+        import urllib.parse
+        encoded_q = urllib.parse.quote(text)
+        url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl={source_lang}&tl={target_lang}&dt=t&q={encoded_q}"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+        with urllib.request.urlopen(req, timeout=3.5) as response:
+            res_data = json.loads(response.read().decode('utf-8'))
+            if res_data and isinstance(res_data, list) and len(res_data) > 0 and isinstance(res_data[0], list):
+                translated = "".join([segment[0] for segment in res_data[0] if segment and segment[0]])
+                if translated:
+                    return translated
+    except Exception as e:
+        print(f"[INFO] Translate fallback for '{text}': {e}")
+
+    return text
+
 
 # Load TFLite Model
 print("[INFO] Loading TFLite Model for Chat Server...")
@@ -127,31 +174,28 @@ def extract_hand_features(results):
             
     return coords
 
-def webcam_capture_loop():
-    global latest_frame_bytes, webcam_running
-    global current_prediction, confidence_score, current_word
+import base64
+
+def process_deaf_frame(frame_data):
+    global current_word, current_prediction, confidence_score
     global last_prediction, prediction_stable_since, last_appended_prediction
     
-    print("[INFO] Starting global webcam capture thread...")
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("[ERROR] Global Thread: Could not open webcam.")
-        webcam_running = False
-        return
-
-    # Set camera resolution to standard 640x480
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-    while webcam_running:
-        success, frame = cap.read()
-        if not success:
-            time.sleep(0.01)
-            continue
+    try:
+        # Decode base64 image
+        if ',' in frame_data:
+            header, encoded = frame_data.split(',', 1)
+        else:
+            encoded = frame_data
+        
+        image_bytes = base64.b64decode(encoded)
+        np_arr = np.frombuffer(image_bytes, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        
+        if frame is None:
+            return frame_data
             
         frame = cv2.flip(frame, 1)
         
-        # Process Hand Landmarks
         prediction_this_frame = "?"
         confidence_this_frame = 0.0
 
@@ -201,16 +245,116 @@ def webcam_capture_loop():
             last_prediction = "?"
             last_appended_prediction = ""
 
-        # Encode frame to JPEG
+        # Encode back to JPEG base64
         ret, buffer = cv2.imencode('.jpg', frame)
         if ret:
-            with frame_lock:
-                latest_frame_bytes = buffer.tobytes()
+            base64_bytes = base64.b64encode(buffer)
+            return "data:image/jpeg;base64," + base64_bytes.decode('utf-8')
+    except Exception as e:
+        print(f"Error processing frame: {e}")
         
-        time.sleep(0.03)  # Yield CPU thread, control framerate
+    return frame_data
+
+# Native OpenCV Webcam Streaming State
+latest_frame_bytes = None
+frame_lock = threading.Lock()
+webcam_running = False
+webcam_thread = None
+
+def webcam_capture_loop():
+    global latest_frame_bytes, webcam_running
+    global current_word, current_prediction, confidence_score
+    global last_prediction, prediction_stable_since, last_appended_prediction
+    
+    print("[INFO] Starting native OpenCV webcam capture thread on laptop...")
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("[ERROR] OpenCV could not open webcam. Another app may be holding it.")
+        webcam_running = False
+        return
+
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+    last_socket_emit_time = 0.0
+    while webcam_running:
+        success, frame = cap.read()
+        if not success:
+            time.sleep(0.01)
+            continue
+            
+        frame = cv2.flip(frame, 1)
+        
+        prediction_this_frame = "?"
+        confidence_this_frame = 0.0
+
+        if model_loaded:
+            img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = hands.process(img_rgb)
+
+            if results.multi_hand_landmarks:
+                for hand_landmarks in results.multi_hand_landmarks:
+                    mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                
+                features = extract_hand_features(results)
+                features = np.array([features], dtype=np.float32)
+                
+                try:
+                    interpreter.set_tensor(input_details[0]['index'], features)
+                    interpreter.invoke()
+                    preds = interpreter.get_tensor(output_details[0]['index'])[0]
+                    class_idx = np.argmax(preds)
+                    confidence_this_frame = float(preds[class_idx])
+                    
+                    if confidence_this_frame > 0.6:
+                        prediction_this_frame = str(class_names[class_idx])
+                except Exception:
+                    pass
+
+        current_prediction = prediction_this_frame
+        confidence_score = confidence_this_frame
+
+        # Stability Tracker and Auto-Append
+        if current_prediction != "?":
+            if current_prediction != last_prediction:
+                last_prediction = current_prediction
+                prediction_stable_since = time.time()
+            else:
+                elapsed = time.time() - prediction_stable_since
+                if elapsed >= STABILITY_THRESHOLD and current_prediction != last_appended_prediction:
+                    if len(current_prediction) == 1:
+                        current_word += current_prediction
+                    else:
+                        formatted_word = current_prediction.replace('_', ' ')
+                        if current_word and not current_word.endswith(' '):
+                            current_word += " "
+                        current_word += formatted_word + " "
+                    last_appended_prediction = current_prediction
+        else:
+            last_prediction = "?"
+            last_appended_prediction = ""
+
+        # Encode frame to JPEG
+        ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 65])
+        if ret:
+            frame_bytes = buffer.tobytes()
+            with frame_lock:
+                latest_frame_bytes = frame_bytes
+                
+            # Broadcast live sign camera frames directly via WebSocket to both Laptop & Mobile in real-time
+            current_time = time.time()
+            if current_time - last_socket_emit_time >= 0.05:  # ~20 FPS
+                last_socket_emit_time = current_time
+                try:
+                    b64_frame = "data:image/jpeg;base64," + base64.b64encode(frame_bytes).decode('utf-8')
+                    socketio.emit('receive_deaf_frame', {'frame': b64_frame})
+                except Exception:
+                    pass
+        
+        time.sleep(0.03)
 
     cap.release()
-    print("[INFO] Global webcam capture thread stopped.")
+    print("[INFO] Native webcam capture thread stopped.")
 
 def start_webcam_thread():
     global webcam_thread, webcam_running
@@ -221,20 +365,21 @@ def start_webcam_thread():
             webcam_thread.start()
 
 def generate_frames():
-    global latest_frame_bytes
     start_webcam_thread()
-    
     while True:
         with frame_lock:
             frame_bytes = latest_frame_bytes
             
         if frame_bytes is None:
-            time.sleep(0.1)
+            time.sleep(0.05)
             continue
             
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
         time.sleep(0.04)
+
+# Start webcam thread automatically
+start_webcam_thread()
 
 @app.route('/')
 def index():
@@ -273,14 +418,42 @@ def handle_action():
             current_word = current_word[:-1]
     elif action == 'clear':
         current_word = ""
+    elif action == 'set':
+        current_word = data.get('word', '')
         
     return jsonify({"status": "success", "current_word": current_word})
+
+@app.route('/translate', methods=['POST'])
+def handle_translate():
+    data = request.json or {}
+    text = data.get('text', '')
+    target_lang = data.get('target_lang', 'en')
+    source_lang = data.get('source_lang', 'auto')
+    
+    if not text:
+        return jsonify({"original": "", "translated": "", "target_lang": target_lang})
+        
+    translated = translate_text(text, target_lang=target_lang, source_lang=source_lang)
+    return jsonify({
+        "original": text,
+        "translated": translated,
+        "source_lang": source_lang,
+        "target_lang": target_lang
+    })
 
 @app.route('/text_to_sign', methods=['POST'])
 def text_to_sign():
     import re
-    data = request.json
-    text = data.get('text', '').upper().strip()
+    data = request.json or {}
+    raw_text = data.get('text', '').strip()
+    
+    # Multilingual support: If input is in Hindi, Tamil, Telugu, etc., translate to English for ISL signs
+    has_non_ascii = any(ord(c) > 127 for c in raw_text)
+    if has_non_ascii:
+        translated_en = translate_text(raw_text, target_lang='en', source_lang='auto')
+        text = translated_en.upper().strip()
+    else:
+        text = raw_text.upper().strip()
     
     signs_dir = os.path.join(os.getcwd(), 'isl_signs')
     allowed_extensions = ['.mp4', '.gif', '.jpg', '.jpeg', '.png']
@@ -377,10 +550,18 @@ def handle_message(data):
     text = data.get('text', '').strip()
     sender = data.get('sender', 'Anonymous')
     role = data.get('role', 'hearing')
+    target_lang = data.get('target_lang', 'en')
     
     if text:
+        # Generate translation for regional language recipients if specified
+        translated_text = ""
+        if target_lang and target_lang != 'en':
+            translated_text = translate_text(text, target_lang=target_lang)
+            
         msg = {
             'text': text,
+            'translated_text': translated_text,
+            'target_lang': target_lang,
             'sender': sender,
             'role': role,
             'time': time.strftime("%H:%M")
@@ -392,6 +573,13 @@ def handle_message(data):
 def handle_hearing_frame(data):
     emit('receive_hearing_frame', data, broadcast=True, include_self=False)
 
+@socketio.on('deaf_frame')
+def handle_deaf_frame(data):
+    frame_data = data.get('frame')
+    if frame_data:
+        processed_frame = process_deaf_frame(frame_data)
+        emit('receive_deaf_frame', {'frame': processed_frame}, broadcast=True)
+
 @socketio.on('clear_chat')
 def handle_clear_chat():
     global chat_history
@@ -399,16 +587,41 @@ def handle_clear_chat():
     emit('chat_cleared', broadcast=True)
 
 # 2. Open browser automatically when the server runs
-def open_browser():
-    import time
-    import webbrowser
-    time.sleep(2.0)
-    print("\n[INFO] Opening application in your web browser...", flush=True)
-    webbrowser.open("http://127.0.0.1:5000")
+has_ssl = False
+try:
+    import OpenSSL
+    has_ssl = True
+except ImportError:
+    pass
 
 if __name__ == '__main__':
-    # Start browser opener in a separate thread so it doesn't block the server
-    threading.Thread(target=open_browser, daemon=True).start()
+    use_ssl = ('--ssl' in sys.argv or '--https' in sys.argv)
     
-    # Listen on all interfaces (0.0.0.0) so devices on the local network can connect
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True)
+    # Only open browser once (avoid opening duplicate tabs on Werkzeug reload)
+    if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        def open_browser():
+            import time
+            import webbrowser
+            time.sleep(2.0)
+            protocol = "https" if use_ssl else "http"
+            url = f"{protocol}://127.0.0.1:5000"
+            print(f"\n[INFO] Opening application in your web browser: {url}", flush=True)
+            webbrowser.open(url)
+        threading.Thread(target=open_browser, daemon=True).start()
+    
+    cert_file = 'cert.pem'
+    key_file = 'key.pem'
+    has_cert = os.path.exists(cert_file) and os.path.exists(key_file)
+    
+    # 3. If SSL certificate is available, start HTTPS server on port 5001 for mobile camera access
+    if has_cert and has_ssl:
+        def run_https_server():
+            print("[INFO] Starting secure HTTPS server on port 5001 for Mobile Camera support...")
+            print("[INFO] Mobile phones can use camera directly via: https://<your-ip>:5001", flush=True)
+            socketio.run(app, host='0.0.0.0', port=5001, ssl_context=(cert_file, key_file), debug=False, allow_unsafe_werkzeug=True)
+        threading.Thread(target=run_https_server, daemon=True).start()
+
+    # 4. Start standard HTTP server on port 5000
+    print("[INFO] Starting standard HTTP server on port 5000...")
+    print("[INFO] Access locally via: http://127.0.0.1:5000", flush=True)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)

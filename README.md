@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # ISL Communication Assistant — Final Year Project
 ### Deaf & Mute People Communication App
 
@@ -12,8 +11,9 @@ This app helps deaf and mute people communicate in two ways:
 |--------|-------------|
 | **Module 1** | Sign Language → Text + Speech (webcam detects ISL gestures, converts to spoken words) |
 | **Module 2** | Text / Speech → Sign Language (hearing person types or speaks, app shows ISL signs) |
+| **Module 3** | **Multilingual Language Support (NEW)**: Real-time bidirectional translation across 14 languages (Hindi, Tamil, Telugu, Marathi, Bengali, Gujarati, Kannada, Malayalam, Punjabi, Spanish, French, German, Arabic, English) with native speech recognition and localized voice output. |
 
-**Tech Stack:** Python · MediaPipe · TensorFlow/Keras · OpenCV · pyttsx3 · SpeechRecognition
+**Tech Stack:** Python · Flask · Socket.IO · MediaPipe · TensorFlow/Keras · OpenCV · pyttsx3 · SpeechRecognition · Web Speech API
 
 ---
 
@@ -124,6 +124,4 @@ isl_project/
 ## Team Credits
 Final Year Project — B.Tech CSE
 Communication Assistant for Deaf and Mute People
-=======
 
->>>>>>> fa283310b6dff6e0849f5986106171e9e3ce79d0
