@@ -122,10 +122,9 @@ function setupRoleSelector() {
     });
 
     joinBtn.addEventListener("click", () => {
-        const inputName = nameInput.value.trim();
+        let inputName = nameInput.value.trim();
         if (!inputName) {
-            alert("Please enter your name!");
-            return;
+            inputName = (userRole === "deaf_mute") ? "Deaf User" : "Hearing User";
         }
 
         username = inputName;
@@ -255,7 +254,12 @@ function setupRoleSelector() {
 
 // 2. Initialize Socket.IO connection
 function initSocket() {
-    socket = io();
+    socket = io({
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000
+    });
 
     socket.on("connect", () => {
         console.log("Connected to server via WebSocket!");
