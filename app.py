@@ -621,7 +621,8 @@ if __name__ == '__main__':
             socketio.run(app, host='0.0.0.0', port=5001, ssl_context=(cert_file, key_file), debug=False, allow_unsafe_werkzeug=True)
         threading.Thread(target=run_https_server, daemon=True).start()
 
-    # 4. Start standard HTTP server on port 5000
-    print("[INFO] Starting standard HTTP server on port 5000...")
-    print("[INFO] Access locally via: http://127.0.0.1:5000", flush=True)
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
+    # 4. Start standard HTTP server (binds to Render's assigned PORT or 5000)
+    port = int(os.environ.get('PORT', 5000))
+    print(f"[INFO] Starting server on port {port}...")
+    print(f"[INFO] Access locally via: http://127.0.0.1:{port}", flush=True)
+    socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)

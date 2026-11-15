@@ -91,7 +91,7 @@ def main():
     mp_drawing = mp.solutions.drawing_utils
     hands = mp_hands.Hands(max_num_hands=2, min_detection_confidence=0.7, min_tracking_confidence=0.5)
 
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     
     if not cap.isOpened():
         print("[ERROR] Could not open webcam.")
@@ -106,6 +106,10 @@ def main():
     prediction_stable_since = 0.0
     last_appended_prediction = ""
     STABILITY_THRESHOLD = 1.5  # seconds
+        # Performance measurement
+    inference_times = []
+    frame_count = 0
+    loop_start_time = time.perf_counter()
 
     print("[INFO] Webcam active. Press 'Q' to quit.")
 
@@ -113,6 +117,7 @@ def main():
         ret, frame = cap.read()
         if not ret:
             break
+        frame_count += 1
 
         frame = cv2.flip(frame, 1)
         h, w, c = frame.shape
@@ -125,6 +130,7 @@ def main():
         results = hands.process(img_rgb)
 
         if results.multi_hand_landmarks:
+            print("[DEBUG] Hand detected")
             for hand_landmarks in results.multi_hand_landmarks:
                 mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
             
@@ -135,12 +141,21 @@ def main():
             # Predict using TFLite (much faster)
             try:
                 interpreter.set_tensor(input_details[0]['index'], features)
+
+                inference_start = time.perf_counter()
                 interpreter.invoke()
+                inference_end = time.perf_counter()
+
+                inference_times.append(
+                    (inference_end - inference_start) * 1000
+                )
+
                 preds = interpreter.get_tensor(output_details[0]['index'])[0]
                 class_idx = np.argmax(preds)
                 confidence_this_frame = float(preds[class_idx])
                 
                 if confidence_this_frame > 0.6:  # Threshold
+                    print(f"[DEBUG] Model confidence: {confidence_this_frame:.4f}")
                     prediction_this_frame = str(class_names[class_idx])
             except Exception as e:
                 print(f"Prediction Error: {e}")
@@ -235,6 +250,25 @@ def main():
 
     cap.release()
     cv2.destroyAllWindows()
+
+    # Performance summary
+    total_time = time.perf_counter() - loop_start_time
+    fps = frame_count / total_time if total_time > 0 else 0
+
+    print("\n===== PERFORMANCE RESULTS =====")
+    print(f"Total processed frames: {frame_count}")
+    print(f"Total runtime: {total_time:.2f} seconds")
+    print(f"Average webcam processing FPS: {fps:.2f}")
+
+    if inference_times:
+        print(f"Total predictions: {len(inference_times)}")
+        print(f"Average inference latency: {np.mean(inference_times):.3f} ms")
+        print(f"Median inference latency: {np.median(inference_times):.3f} ms")
+        print(f"95th percentile latency: {np.percentile(inference_times, 95):.3f} ms")
+        print(f"Minimum inference latency: {np.min(inference_times):.3f} ms")
+        print(f"Maximum inference latency: {np.max(inference_times):.3f} ms")
+    else:
+        print("No model predictions were recorded.")
 
 if __name__ == "__main__":
     main()
