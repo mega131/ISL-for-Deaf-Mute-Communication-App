@@ -12,3 +12,5 @@ tqdm==4.66.1
 Flask==3.0.0
 flask-socketio==5.6.1
 python-socketio==5.16.2
+gunicorn==21.2.0
+eventlet==0.33.3
