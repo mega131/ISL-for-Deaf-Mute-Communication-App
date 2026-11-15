@@ -261,16 +261,29 @@ frame_lock = threading.Lock()
 webcam_running = False
 webcam_thread = None
 
+def get_placeholder_frame():
+    try:
+        img = np.zeros((480, 640, 3), dtype=np.uint8)
+        img[:] = (30, 23, 15)  # #0f172a theme color (BGR)
+        cv2.putText(img, "Camera Standby (Cloud Mode)", (80, 220), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (240, 240, 240), 2)
+        cv2.putText(img, "Please use Mobile / Face Camera", (95, 260), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (150, 180, 200), 2)
+        ret, buf = cv2.imencode('.jpg', img)
+        return buf.tobytes() if ret else b''
+    except Exception:
+        return b''
+
 def webcam_capture_loop():
     global latest_frame_bytes, webcam_running
     global current_word, current_prediction, confidence_score
     global last_prediction, prediction_stable_since, last_appended_prediction
     
-    print("[INFO] Starting native OpenCV webcam capture thread on laptop...")
+    print("[INFO] Starting native OpenCV webcam capture thread...")
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        print("[ERROR] OpenCV could not open webcam. Another app may be holding it.")
+        print("[INFO] Hardware webcam not found (running in Cloud/Render container).")
         webcam_running = False
+        with frame_lock:
+            latest_frame_bytes = get_placeholder_frame()
         return
 
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
@@ -366,17 +379,17 @@ def start_webcam_thread():
 
 def generate_frames():
     start_webcam_thread()
+    placeholder = get_placeholder_frame()
     while True:
         with frame_lock:
             frame_bytes = latest_frame_bytes
             
-        if frame_bytes is None:
-            time.sleep(0.05)
-            continue
+        if not frame_bytes:
+            frame_bytes = placeholder
             
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        time.sleep(0.04)
+        time.sleep(0.08)
 
 # Start webcam thread automatically
 start_webcam_thread()
