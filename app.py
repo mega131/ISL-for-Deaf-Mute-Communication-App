@@ -9,8 +9,12 @@ import subprocess
 import os
 import threading
 
-# 1. Check and Auto-Install Dependencies
+# 1. Check and Auto-Install Dependencies (Local dev only)
 def install_requirements():
+    # Never auto-install inside Cloud/Render (build step already handles it)
+    if os.environ.get("RENDER"):
+        return
+        
     required_libs = {
         'flask': 'Flask==3.0.0',
         'flask_socketio': 'flask-socketio==5.6.1',
@@ -25,8 +29,7 @@ def install_requirements():
         'matplotlib': 'matplotlib==3.7.2',
         'speech_recognition': 'SpeechRecognition==3.10.0',
         'PIL': 'Pillow==10.0.0',
-        'tqdm': 'tqdm==4.66.1',
-        'OpenSSL': 'pyopenssl'
+        'tqdm': 'tqdm==4.66.1'
     }
     
     missing_libs = []
@@ -605,19 +608,20 @@ def handle_clear_chat():
     chat_history = []
     emit('chat_cleared', broadcast=True)
 
-# 2. Open browser automatically when the server runs
+# 2. Local SSL & browser automation (disabled in Cloud/Render)
 has_ssl = False
-try:
-    import OpenSSL
-    has_ssl = True
-except ImportError:
-    pass
+if not os.environ.get("RENDER"):
+    try:
+        import OpenSSL
+        has_ssl = True
+    except Exception:
+        has_ssl = False
 
 if __name__ == '__main__':
     use_ssl = ('--ssl' in sys.argv or '--https' in sys.argv)
     
-    # Only open browser once (avoid opening duplicate tabs on Werkzeug reload)
-    if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+    # Only open browser once on local desktop
+    if not os.environ.get("RENDER") and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
         def open_browser():
             import time
             import webbrowser
@@ -625,7 +629,10 @@ if __name__ == '__main__':
             protocol = "https" if use_ssl else "http"
             url = f"{protocol}://127.0.0.1:5000"
             print(f"\n[INFO] Opening application in your web browser: {url}", flush=True)
-            webbrowser.open(url)
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
         threading.Thread(target=open_browser, daemon=True).start()
     
     cert_file = 'cert.pem'
